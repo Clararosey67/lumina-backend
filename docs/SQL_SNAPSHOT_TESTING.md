@@ -55,6 +55,10 @@ Representative test cases covered:
   - Values bound as parameters (never interpolated)
   - Network included in every predicate
   - Any pagination uses keyset comparison rather than `OFFSET`
+- **`getOperationsByTransactionHash`**:
+  - Generated SQL asserted for a representative transaction hash
+  - Hash and network values bound as parameters (never interpolated)
+  - Network included in the query predicate; no `OFFSET` pagination
 
 ---
 

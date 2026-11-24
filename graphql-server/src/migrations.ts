@@ -67,6 +67,13 @@ const CONCURRENT_MIGRATIONS = new Set([
   '021_ledger_audit_window_index',
 ]);
 
+async function recordMigration(client: PoolClient, version: string): Promise<void> {
+  await client.query(
+    'INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING',
+    [version]
+  );
+}
+
 /**
  * Split on statement terminators while preserving semicolons inside quoted
  * strings, comments and dollar-quoted function bodies.
@@ -169,15 +176,17 @@ export function splitStatements(sql: string): string[] {
 }
 
 async function applyMigration(client: PoolClient, migration: Migration): Promise<void> {
-  // These migrations are idempotent and write their history row last, so a
-  // failure part-way is safe to re-run.
+  // The runner records history after each script succeeds. The concurrent
+  // migrations also record themselves for direct psql execution.
   if (CONCURRENT_MIGRATIONS.has(migration.version)) {
     for (const statement of splitStatements(migration.sql)) await client.query(statement);
+    await recordMigration(client, migration.version);
     return;
   }
   await client.query('BEGIN');
   try {
     for (const statement of splitStatements(migration.sql)) await client.query(statement);
+    await recordMigration(client, migration.version);
     await client.query('COMMIT');
   } catch (error) { await client.query('ROLLBACK'); throw error; }
 }

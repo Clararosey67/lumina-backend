@@ -2,8 +2,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Pool } from 'pg';
-import { isMigrationIrreversible, loadDownMigrations, loadMigrations, migrationStatus, rollbackMigration, splitStatements } from './migrations';
+import type { Pool, PoolClient } from 'pg';
+import {
+  isMigrationIrreversible,
+  loadDownMigrations,
+  loadMigrations,
+  migrationStatus,
+  rollbackMigration,
+  runMigrations,
+  splitStatements,
+} from './migrations';
 
 const MIGRATIONS_DIR = join(__dirname, '..', '..', 'db', 'migrations');
 
@@ -141,6 +149,35 @@ test('migration status refuses a later migration when an earlier one is pending'
   await assert.rejects(() => migrationStatus(pool, [
     { version: '001_init', sql: '' }, { version: '002_account_event_columns', sql: '' },
   ]), /out of order/);
+});
+
+test('runMigrations records history for scripts without a history insert', async () => {
+  const recorded: string[] = [];
+  const statements: string[] = [];
+  const client = {
+    query: async (sql: string, values?: unknown[]) => {
+      statements.push(sql);
+      if (sql.startsWith('SELECT version FROM schema_migrations')) {
+        return { rows: recorded.map(version => ({ version })) };
+      }
+      if (sql.startsWith('INSERT INTO schema_migrations')) {
+        const version = values?.[0];
+        assert.equal(typeof version, 'string');
+        if (typeof version === 'string') recorded.push(version);
+      }
+      return { rows: [] };
+    },
+    release: () => undefined,
+  } as unknown as PoolClient;
+  const pool = { connect: async () => client } as unknown as Pool;
+  const version = '20261124120000_test_migration_history';
+
+  const status = await runMigrations(pool, [{ version, sql: 'CREATE TABLE example (id INTEGER);' }]);
+
+  assert.deepEqual(status.applied, [version]);
+  assert.deepEqual(recorded, [version]);
+  assert.ok(statements.includes('BEGIN'));
+  assert.ok(statements.includes('COMMIT'));
 });
 
 test('loadDownMigrations loads all down migration scripts', () => {

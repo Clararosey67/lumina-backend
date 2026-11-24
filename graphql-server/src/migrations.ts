@@ -64,20 +64,106 @@ const CONCURRENT_MIGRATIONS = new Set([
   '021_ledger_audit_window_index',
 ]);
 
-/**
- * One statement per element, comments dropped.
- *
- * Postgres runs a multi-statement query string as one implicit transaction, so
- * sending a concurrent migration whole fails exactly as BEGIN would. The split
- * is on a `;` that ends a line, which is safe for these files because none of
- * them contains a function body.
- */
+/** Split SQL statements while keeping semicolons inside strings and function bodies intact. */
 export function splitStatements(sql: string): string[] {
-  return sql
-    .replace(/^\s*--.*$/gm, '')
-    .split(/;\s*$/m)
-    .map(statement => statement.trim())
-    .filter(statement => statement.length > 0);
+  const statements: string[] = [];
+  let start = 0;
+  let index = 0;
+  let lineComment = false;
+  let blockCommentDepth = 0;
+  let quote: "'" | '"' | null = null;
+  let escapeString = false;
+  let dollarQuote: string | null = null;
+
+  while (index < sql.length) {
+    const character = sql[index];
+    const next = sql[index + 1];
+
+    if (lineComment) {
+      if (character === '\n') lineComment = false;
+      index += 1;
+      continue;
+    }
+
+    if (blockCommentDepth > 0) {
+      if (character === '/' && next === '*') {
+        blockCommentDepth += 1;
+        index += 2;
+      } else if (character === '*' && next === '/') {
+        blockCommentDepth -= 1;
+        index += 2;
+      } else {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (dollarQuote) {
+      if (sql.startsWith(dollarQuote, index)) {
+        index += dollarQuote.length;
+        dollarQuote = null;
+      } else {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (quote) {
+      if (character === quote && next === quote) {
+        index += 2;
+      } else if (character === quote) {
+        quote = null;
+        escapeString = false;
+        index += 1;
+      } else if (
+        quote === "'" &&
+        escapeString &&
+        character === '\\'
+      ) {
+        index += 2;
+      } else {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (character === '-' && next === '-') {
+      lineComment = true;
+      index += 2;
+    } else if (character === '/' && next === '*') {
+      blockCommentDepth = 1;
+      index += 2;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+      escapeString = character === "'" &&
+        /[eE]/.test(sql[index - 1] ?? '') &&
+        !/[A-Za-z0-9_$]/.test(sql[index - 2] ?? '');
+      index += 1;
+    } else if (character === '$') {
+      const delimiter = sql.slice(index).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/)?.[0];
+      if (delimiter) {
+        dollarQuote = delimiter;
+        index += delimiter.length;
+      } else {
+        index += 1;
+      }
+    } else if (character === ';') {
+      const statement = sql.slice(start, index).replace(/^\s*--.*$/gm, '').trim();
+      if (statement) statements.push(statement);
+      start = index + 1;
+      index += 1;
+    } else {
+      index += 1;
+    }
+  }
+
+  if (quote || dollarQuote || blockCommentDepth > 0) {
+    throw new Error('Unterminated quote or comment in SQL statements');
+  }
+
+  const finalStatement = sql.slice(start).replace(/^\s*--.*$/gm, '').trim();
+  if (finalStatement) statements.push(finalStatement);
+  return statements;
 }
 
 async function applyMigration(client: PoolClient, migration: Migration): Promise<void> {
@@ -88,8 +174,10 @@ async function applyMigration(client: PoolClient, migration: Migration): Promise
     return;
   }
   await client.query('BEGIN');
-  try { await client.query(migration.sql); await client.query('COMMIT'); }
-  catch (error) { await client.query('ROLLBACK'); throw error; }
+  try {
+    for (const statement of splitStatements(migration.sql)) await client.query(statement);
+    await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
 }
 
 /** Migrations that restructure underlying tables, partitions, or primary keys and cannot be reverted in-place. */

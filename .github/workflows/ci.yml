@@ -221,7 +221,7 @@ jobs:
     # A hung test must fail fast rather than sit until the six-hour default.
     # This job did exactly that: every test passed and the process then refused
     # to exit, because a leaked Postgres connection kept the event loop alive.
-    timeout-minutes: 20
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
@@ -251,7 +251,6 @@ jobs:
         working-directory: graphql-server
         env:
           TEST_DATABASE_URL: postgresql://lumina:lumina_test@localhost:5432/lumina_test
-          MIGRATION_TEST_BASE_URL: postgresql://lumina:lumina_test@localhost:5432/postgres
       - run: npm ci --workspace @lumina/indexer
         working-directory: .
       # The custom-schema round trip: register, index, and read back an i128

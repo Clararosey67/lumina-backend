@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
-import type { Pool, PoolClient } from 'pg';
+import type { Pool, PoolClient, QueryConfig } from 'pg';
 
 export interface Migration { version: string; sql: string; }
 
@@ -89,7 +89,11 @@ async function applyMigration(client: PoolClient, migration: Migration): Promise
   }
   await client.query('BEGIN');
   try {
-    await client.query({ text: migration.sql, queryMode: 'simple' });
+    const query: QueryConfig & { queryMode: 'simple' } = {
+      text: migration.sql,
+      queryMode: 'simple',
+    };
+    await client.query(query);
     await client.query('COMMIT');
   } catch (error) { await client.query('ROLLBACK'); throw error; }
 }

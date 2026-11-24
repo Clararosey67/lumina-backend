@@ -124,6 +124,18 @@ test('concurrent migrations are sent one statement at a time', () => {
   ]);
 });
 
+test('splits the initial schema without breaking dollar-quoted functions', () => {
+  const migration = loadMigrations(MIGRATIONS_DIR).find(item => item.version === '001_init');
+  assert.ok(migration);
+
+  const statements = splitStatements(migration.sql);
+  const ensurePartitions = statements.find(statement =>
+    statement.includes('CREATE OR REPLACE FUNCTION ensure_operations_partitions')
+  );
+  assert.ok(ensurePartitions);
+  assert.match(ensurePartitions, /RETURNS void AS \$\$[\s\S]*END;\s*\$\$ LANGUAGE plpgsql/);
+});
+
 test('migration status refuses a later migration when an earlier one is pending', async () => {
   const pool = { query: async () => ({ rows: [{ version: '002_account_event_columns' }] }) } as unknown as Pool;
   await assert.rejects(() => migrationStatus(pool, [

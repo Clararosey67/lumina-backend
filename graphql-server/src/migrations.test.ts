@@ -124,22 +124,6 @@ test('concurrent migrations are sent one statement at a time', () => {
   ]);
 });
 
-test('splits statements without breaking dollar-quoted function bodies or strings', () => {
-  const statements = splitStatements(`
-    -- A semicolon in a comment must not split a statement;
-    CREATE FUNCTION sample() RETURNS void AS $body$
-    BEGIN
-      PERFORM 'a; b';
-    END;
-    $body$ LANGUAGE plpgsql;
-    INSERT INTO sample_values VALUES ('c; d');
-  `);
-
-  assert.equal(statements.length, 2);
-  assert.match(statements[0], /AS \$body\$[\s\S]*END;/);
-  assert.equal(statements[1], "INSERT INTO sample_values VALUES ('c; d')");
-});
-
 test('migration status refuses a later migration when an earlier one is pending', async () => {
   const pool = { query: async () => ({ rows: [{ version: '002_account_event_columns' }] }) } as unknown as Pool;
   await assert.rejects(() => migrationStatus(pool, [

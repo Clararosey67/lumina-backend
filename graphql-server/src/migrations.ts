@@ -56,6 +56,7 @@ export async function runMigrations(pool: Pool, migrations: Migration[], apply =
 
 /** Migrations that build or drop indexes CONCURRENTLY, which cannot run inside a transaction. */
 const CONCURRENT_MIGRATIONS = new Set([
+  '001_init',
   '004_search_indexes',
   '008_accounts_listing_index',
   '010_transaction_filters',
